@@ -6,24 +6,28 @@ from repository import ProjectRepository
 
 
 DELIVERY_WARNING_DAYS = 15
+DELIVERY_CRITICAL_DAYS = 7
+LOW_MARGIN_THRESHOLD = 20.0
+HIGH_OVER_BUDGET_THRESHOLD = 10.0
 
 
 class Dashboard:
     def __init__(self, projects: List[Project]):
         self.projects = projects
 
-    def get_overall_stats(self) -> dict:
-        total_contract = sum(p.contract_amount for p in self.projects)
-        total_cost = sum(p.total_cost for p in self.projects)
-        total_budget = sum(p.total_budget for p in self.projects)
+    def get_overall_stats(self, projects: Optional[List[Project]] = None) -> dict:
+        target_projects = projects if projects is not None else self.projects
+        total_contract = sum(p.contract_amount for p in target_projects)
+        total_cost = sum(p.total_cost for p in target_projects)
+        total_budget = sum(p.total_budget for p in target_projects)
         total_profit = total_contract - total_cost
-        avg_progress = sum(p.overall_completion for p in self.projects) / len(self.projects) if self.projects else 0.0
+        avg_progress = sum(p.overall_completion for p in target_projects) / len(target_projects) if target_projects else 0.0
 
-        delayed_count = sum(1 for p in self.projects if p.is_delayed)
-        over_budget_count = sum(1 for p in self.projects if p.is_over_budget)
+        delayed_count = sum(1 for p in target_projects if p.is_delayed)
+        over_budget_count = sum(1 for p in target_projects if p.is_over_budget)
 
         return {
-            "project_count": len(self.projects),
+            "project_count": len(target_projects),
             "total_contract": total_contract,
             "total_budget": total_budget,
             "total_cost": total_cost,
@@ -52,23 +56,25 @@ class Dashboard:
         delayed.sort(key=lambda x: x.max_delay_days, reverse=True)
         return delayed
 
-    def filter_by_status(self, status: str) -> List[Project]:
+    def filter_by_status(self, status: str, projects: Optional[List[Project]] = None) -> List[Project]:
+        target = projects if projects is not None else self.projects
         if status == "all":
-            return self.projects
+            return target
         elif status == "delayed":
-            return [p for p in self.projects if p.is_delayed]
+            return [p for p in target if p.is_delayed]
         elif status == "normal":
-            return [p for p in self.projects if not p.is_delayed]
+            return [p for p in target if not p.is_delayed]
         elif status == "over_budget":
-            return [p for p in self.projects if p.is_over_budget]
+            return [p for p in target if p.is_over_budget]
         else:
-            return self.projects
+            return target
 
-    def filter_by_owner(self, owner: str) -> List[Project]:
+    def filter_by_owner(self, owner: str, projects: Optional[List[Project]] = None) -> List[Project]:
+        target = projects if projects is not None else self.projects
         if not owner or owner == "all":
-            return self.projects
+            return target
         owner_lower = owner.strip().lower()
-        return [p for p in self.projects if any(ph.owner and ph.owner.strip().lower() == owner_lower for ph in p.phases)]
+        return [p for p in target if any(ph.owner and ph.owner.strip().lower() == owner_lower for ph in p.phases)]
 
     def get_all_owners(self) -> List[str]:
         owners = set()
@@ -77,6 +83,56 @@ class Dashboard:
                 owners.add(owner)
         return sorted(list(owners))
 
+    def _get_project_risk_score(self, project: Project) -> Tuple[int, List[str], str]:
+        risks = []
+        score = 0
+
+        days_delivery = project.days_to_delivery
+        if days_delivery is not None:
+            if days_delivery < 0:
+                score += 50
+                risks.append("已逾期")
+            elif days_delivery <= DELIVERY_CRITICAL_DAYS:
+                score += 40
+                risks.append("交期紧急")
+            elif days_delivery <= DELIVERY_WARNING_DAYS:
+                score += 20
+                risks.append("即将交付")
+
+        if project.is_delayed:
+            score += min(project.max_delay_days * 3, 30)
+            risks.append(f"延期{project.max_delay_days}天")
+
+        if project.is_over_budget:
+            over_pct = project.budget_variance_percent
+            score += min(int(over_pct * 2), 30)
+            if over_pct >= HIGH_OVER_BUDGET_THRESHOLD:
+                risks.append(f"超支严重({over_pct:.1f}%)")
+            else:
+                risks.append(f"超支{over_pct:.1f}%")
+
+        margin = project.gross_margin
+        if margin < LOW_MARGIN_THRESHOLD:
+            score += max(0, int((LOW_MARGIN_THRESHOLD - margin) * 3))
+            if margin < 0:
+                risks.append("亏损")
+            else:
+                risks.append(f"低毛利({margin:.1f}%)")
+
+        risk_level = "🔴" if score >= 60 else ("🟠" if score >= 30 else "🟢")
+
+        return score, risks, risk_level
+
+    def get_priority_projects(self, top_n: int = 5) -> List[Tuple[Project, int, List[str], str]]:
+        scored = []
+        for p in self.projects:
+            score, risks, level = self._get_project_risk_score(p)
+            if score > 0:
+                scored.append((p, score, risks, level))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_n]
+
     def render(self, status_filter: str = "all", owner_filter: str = "all") -> str:
         lines = []
 
@@ -84,10 +140,10 @@ class Dashboard:
         filtered = [p for p in filtered if (owner_filter == "all" or any(ph.owner and ph.owner.strip() == owner_filter for ph in p.phases))]
 
         lines.append("\n" + "=" * 100)
-        lines.append("  📊 多项目汇总看板")
+        lines.append("  📊 多项目经营看板")
         lines.append("=" * 100)
 
-        stats = self.get_overall_stats()
+        stats = self.get_overall_stats(filtered)
         lines.append(f"\n  【总体统计】  共 {stats['project_count']} 个项目")
         lines.append(f"    总合同额:  ¥{stats['total_contract']:>14,.2f}")
         lines.append(f"    总预算:    ¥{stats['total_budget']:>14,.2f}")
@@ -100,6 +156,22 @@ class Dashboard:
         lines.append(f"  当前筛选: 状态={status_filter} | 负责人={owner_filter}")
         lines.append(f"  显示项目数: {len(filtered)} 个")
         lines.append("-" * 100)
+
+        priority_projects = self.get_priority_projects()
+        if priority_projects:
+            lines.append("\n  【🎯 重点关注项目】")
+            lines.append("  " + "-" * 96)
+            for p, score, risks, level in priority_projects:
+                risk_tags = "  ".join(f"[{r}]" for r in risks)
+                name = p.name[:18] + "..." if len(p.name) > 18 else p.name
+                lines.append(
+                    f"    {level} {name:<20} "
+                    f"进度:{p.overall_completion:>5.1f}%  "
+                    f"毛利:{p.gross_margin:>6.1f}%  "
+                    f"交付:{p.days_to_delivery or '-':>3}天  "
+                )
+                lines.append(f"       风险: {risk_tags}")
+            lines.append("")
 
         lines.append(
             f"\n  {'项目名称':<18} {'合同额':>12} {'预算':>12} {'实际成本':>12} "

@@ -73,8 +73,8 @@ class ProjectTrackerApp:
         self.reminder.show_reminder(projects)
 
         if projects:
-            print(f"当前系统中共有 {len(projects)} 个项目")
-            print()
+            pause()
+            self._show_dashboard()
 
         while True:
             self._show_main_menu()
@@ -425,14 +425,45 @@ class ProjectTrackerApp:
             changed = True
 
         if not changed:
-            print("\n  ℹ️  未检测到任何修改")
+            print("\n  ℹ️  未检测到任何修改，数据未变动")
+            pause()
+            return False
         else:
             print(f"\n  ✅ 保存成功！已修改 {len(changes)} 项:")
             for c in changes:
                 print(f"     - {c}")
 
+        print()
+        print("  " + "-" * 50)
+        print(f"  📊 【{phase.name}】阶段最新状态:")
+        print(f"     完成度: {phase.completion_percent:.1f}%")
+
         if phase.is_delayed():
-            print(f"\n  ⚠️  注意: 该阶段已延期 {phase.delay_days()} 天")
+            delay_days = phase.delay_days()
+            print(f"     延期状态: ❌ 已延期 {delay_days} 天")
+            if phase.planned_end:
+                print(f"     计划完成: {phase.planned_end.strftime('%Y-%m-%d')}")
+            if phase.actual_end:
+                print(f"     实际完成: {phase.actual_end.strftime('%Y-%m-%d')}")
+        else:
+            print(f"     延期状态: ✅ 正常（未延期）")
+
+        if phase.budget.total > 0:
+            if phase.is_over_budget():
+                var = phase.budget_variance()
+                var_pct = phase.budget_variance_percent()
+                print(f"     预算状态: ❌ 已超支 +¥{var:,.2f} (+{var_pct:.2f}%)")
+                print(f"     预算合计: ¥{phase.budget.total:,.2f}")
+                print(f"     实际成本: ¥{phase.cost.total:,.2f}")
+            else:
+                remaining = phase.budget.total - phase.cost.total
+                print(f"     预算状态: ✅ 正常（未超支）")
+                print(f"     剩余预算: ¥{remaining:,.2f}")
+        else:
+            print(f"     预算状态: ℹ️  未设置预算")
+
+        if phase.owner:
+            print(f"     负责人: {phase.owner}")
 
         pause()
         return True
@@ -533,7 +564,9 @@ class ProjectTrackerApp:
 
         new_total = c.total
         if abs(new_total - old_total) < 0.01:
-            print("\n  ℹ️  未检测到成本变化")
+            print("\n  ℹ️  未检测到成本变化，数据未变动")
+            pause()
+            return False
         else:
             print(f"\n  ✅ 保存成功！")
             print(f"     总成本变化: ¥{old_total:,.2f} → ¥{new_total:,.2f}")
@@ -541,11 +574,36 @@ class ProjectTrackerApp:
             diff_sign = "+" if diff > 0 else ""
             print(f"     差额: {diff_sign}¥{diff:,.2f}")
 
-            if phase.budget.total > 0:
-                if phase.is_over_budget():
-                    print(f"     ⚠️  注意: 当前已超支 ¥{phase.budget_variance():,.2f} ({phase.budget_variance_percent():.2f}%)")
-                else:
-                    print(f"     ℹ️  剩余预算: ¥{phase.budget.total - phase.cost.total:,.2f}")
+        print()
+        print("  " + "-" * 50)
+        print(f"  📊 【{phase.name}】阶段成本状态:")
+        print(f"     外购件: ¥{c.purchased_parts:,.2f}")
+        print(f"     标准件: ¥{c.standard_parts:,.2f}")
+        print(f"     机加工费: ¥{c.machining_fee:,.2f}")
+        print(f"     人工: {c.labor_hours:.1f}小时 × ¥{c.labor_hour_rate:.2f} = ¥{c.labor_cost:,.2f}")
+        print(f"     成本合计: ¥{new_total:,.2f}")
+
+        if phase.is_delayed():
+            print(f"     延期状态: ❌ 已延期 {phase.delay_days()} 天")
+        else:
+            print(f"     延期状态: ✅ 正常（未延期）")
+
+        if phase.budget.total > 0:
+            if phase.is_over_budget():
+                var = phase.budget_variance()
+                var_pct = phase.budget_variance_percent()
+                print(f"     预算状态: ❌ 已超支 +¥{var:,.2f} (+{var_pct:.2f}%)")
+                print(f"     预算合计: ¥{phase.budget.total:,.2f}")
+            else:
+                remaining = phase.budget.total - phase.cost.total
+                print(f"     预算状态: ✅ 正常（未超支）")
+                print(f"     预算合计: ¥{phase.budget.total:,.2f}")
+                print(f"     剩余预算: ¥{remaining:,.2f}")
+        else:
+            print(f"     预算状态: ℹ️  未设置预算")
+
+        if phase.owner:
+            print(f"     负责人: {phase.owner}")
 
         pause()
         return True
@@ -643,7 +701,9 @@ class ProjectTrackerApp:
 
         new_total = b.total
         if abs(new_total - old_total) < 0.01:
-            print("\n  ℹ️  未检测到预算变化")
+            print("\n  ℹ️  未检测到预算变化，数据未变动")
+            pause()
+            return False
         else:
             print(f"\n  ✅ 保存成功！")
             print(f"     预算合计: ¥{old_total:,.2f} → ¥{new_total:,.2f}")
@@ -651,11 +711,33 @@ class ProjectTrackerApp:
             diff_sign = "+" if diff > 0 else ""
             print(f"     差额: {diff_sign}¥{diff:,.2f}")
 
-            if phase.cost.total > 0:
-                if phase.is_over_budget():
-                    print(f"     ⚠️  注意: 当前已超支 ¥{phase.budget_variance():,.2f}")
-                else:
-                    print(f"     ℹ️  剩余预算: ¥{phase.budget.total - phase.cost.total:,.2f}")
+        print()
+        print("  " + "-" * 50)
+        print(f"  📊 【{phase.name}】阶段预算状态:")
+        print(f"     外购件预算: ¥{b.purchased_parts:,.2f}")
+        print(f"     标准件预算: ¥{b.standard_parts:,.2f}")
+        print(f"     机加工费预算: ¥{b.machining_fee:,.2f}")
+        print(f"     人工成本预算: ¥{b.labor_cost:,.2f}")
+        print(f"     预算合计: ¥{new_total:,.2f}")
+
+        if phase.cost.total > 0:
+            print(f"     实际成本: ¥{phase.cost.total:,.2f}")
+            if phase.is_over_budget():
+                var = phase.budget_variance()
+                var_pct = phase.budget_variance_percent()
+                print(f"     预算状态: ❌ 已超支 +¥{var:,.2f} (+{var_pct:.2f}%)")
+            else:
+                remaining = phase.budget.total - phase.cost.total
+                print(f"     预算状态: ✅ 正常（未超支）")
+                print(f"     剩余预算: ¥{remaining:,.2f}")
+
+        if phase.is_delayed():
+            print(f"     延期状态: ❌ 已延期 {phase.delay_days()} 天")
+        else:
+            print(f"     延期状态: ✅ 正常（未延期）")
+
+        if phase.owner:
+            print(f"     负责人: {phase.owner}")
 
         pause()
         return True

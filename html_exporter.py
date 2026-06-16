@@ -36,6 +36,7 @@ class HtmlExporter:
                         <span class="warning-icon">⏰</span>
                         <span class="warning-text"><strong>{ph.name}</strong> 阶段延期 {ph.delay_days()} 天</span>
                         <span class="warning-owner">负责人：{ph.owner or '未指派'}</span>
+                        <span class="warning-completion">完成度：{ph.completion_percent:.1f}%</span>
                     </div>
                     """
             if over_budget_phases:
@@ -54,6 +55,8 @@ class HtmlExporter:
                 {warning_items}
             </div>
             """
+
+        summary_section = self._generate_summary_section(delayed_phases, over_budget_phases)
 
         phase_rows = ""
         for phase in p.phases:
@@ -155,7 +158,8 @@ class HtmlExporter:
 
         gantt_html = self._generate_gantt_chart()
         budget_chart_html = self._generate_budget_chart()
-        cost_chart_html = self._generate_cost_chart()
+        cost_breakdown_html = self._generate_cost_breakdown_chart(total_a_purchased, total_a_standard, total_a_machining, total_a_labor, total_a_total)
+        progress_chart_html = self._generate_progress_chart()
 
         profit_status = "positive" if p.gross_profit >= 0 else "negative"
         budget_status = "over" if p.is_over_budget else "under"
@@ -207,6 +211,49 @@ class HtmlExporter:
             margin-bottom: 20px;
             font-size: 14px;
         }}
+        .summary-box {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+        }}
+        .summary-box h2 {{
+            color: white;
+            margin: 0 0 15px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.3);
+            padding-bottom: 10px;
+            font-size: 18px;
+        }}
+        .summary-grid {{
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+        }}
+        .summary-item {{
+            background: rgba(255,255,255,0.15);
+            padding: 12px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+        }}
+        .summary-item-label {{
+            font-size: 12px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }}
+        .summary-item-value {{
+            font-size: 20px;
+            font-weight: 600;
+        }}
+        .summary-item-sub {{
+            font-size: 11px;
+            opacity: 0.85;
+            margin-top: 3px;
+        }}
+        .delayed-summary {{
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+        }}
         .warning-section {{
             background: #fff7ed;
             border: 1px solid #fed7aa;
@@ -222,9 +269,11 @@ class HtmlExporter:
         .warning-item {{
             display: flex;
             align-items: center;
-            padding: 8px 0;
+            padding: 10px 0;
             border-bottom: 1px dashed #fed7aa;
             font-size: 14px;
+            flex-wrap: wrap;
+            gap: 10px;
         }}
         .warning-item:last-child {{ border-bottom: none; }}
         .warning-item.delayed-item .warning-icon {{ color: #dc2626; }}
@@ -233,10 +282,20 @@ class HtmlExporter:
             font-size: 18px;
             margin-right: 10px;
         }}
-        .warning-text {{ flex: 1; }}
+        .warning-text {{ flex: 1; min-width: 200px; }}
         .warning-owner {{
             color: #666;
             font-size: 13px;
+            background: #f3f4f6;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }}
+        .warning-completion {{
+            color: #0891b2;
+            font-size: 13px;
+            background: #cffafe;
+            padding: 2px 8px;
+            border-radius: 4px;
         }}
         .summary-cards {{
             display: grid;
@@ -507,6 +566,125 @@ class HtmlExporter:
         }}
         .cost-item-var.over {{ color: #e74c3c; }}
         .cost-item-var.under {{ color: #2ecc71; }}
+        .progress-ring-container {{
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 30px;
+            padding: 20px 0;
+        }}
+        .progress-ring {{
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: conic-gradient(#4361ee var(--progress), #e9ecef 0);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }}
+        .progress-ring::before {{
+            content: '';
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: white;
+        }}
+        .progress-ring-text {{
+            position: relative;
+            z-index: 1;
+            text-align: center;
+        }}
+        .progress-ring-value {{
+            font-size: 24px;
+            font-weight: 600;
+            color: #1a1a2e;
+        }}
+        .progress-ring-label {{
+            font-size: 11px;
+            color: #666;
+            margin-top: 2px;
+        }}
+        .cost-breakdown {{
+            display: flex;
+            align-items: center;
+            gap: 40px;
+            padding: 20px 0;
+        }}
+        .cost-pie {{
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            position: relative;
+        }}
+        .cost-pie::after {{
+            content: '';
+            position: absolute;
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: white;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }}
+        .cost-pie-center {{
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 1;
+        }}
+        .cost-pie-value {{
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a1a2e;
+        }}
+        .cost-pie-label {{
+            font-size: 11px;
+            color: #666;
+        }}
+        .cost-legend {{
+            flex: 1;
+        }}
+        .cost-legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }}
+        .cost-legend-color {{
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            flex-shrink: 0;
+        }}
+        .cost-legend-text {{
+            flex: 1;
+            font-size: 13px;
+        }}
+        .cost-legend-amount {{
+            font-size: 13px;
+            font-weight: 600;
+            color: #1a1a2e;
+        }}
+        .cost-legend-pct {{
+            font-size: 12px;
+            color: #666;
+            width: 60px;
+            text-align: right;
+        }}
+        .chart-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }}
+        @media (max-width: 768px) {{
+            .chart-grid {{ grid-template-columns: 1fr; }}
+        }}
     </style>
 </head>
 <body>
@@ -514,7 +692,20 @@ class HtmlExporter:
         <h1>{p.name}</h1>
         <p class="subtitle">项目ID: {p.id} | 目标交付日期: {p.target_delivery_date.strftime('%Y-%m-%d') if p.target_delivery_date else '未设置'} | 报告生成时间: {date.today().strftime('%Y-%m-%d')}</p>
 
+        {summary_section}
+
         {warning_section}
+
+        <div class="chart-grid">
+            <div>
+                <h3>📈 整体进度</h3>
+                {progress_chart_html}
+            </div>
+            <div>
+                <h3>💰 成本构成</h3>
+                {cost_breakdown_html}
+            </div>
+        </div>
 
         <div class="summary-cards">
             <div class="card">
@@ -676,6 +867,163 @@ class HtmlExporter:
 
         return html
 
+    def _generate_summary_section(self, delayed_phases: List[Phase], over_budget_phases: List[Phase]) -> str:
+        p = self.project
+
+        delayed_html = ""
+        if delayed_phases:
+            items = []
+            for ph in delayed_phases:
+                items.append(
+                    f"{ph.name}({ph.delay_days()}天, {ph.completion_percent:.0f}%, {ph.owner or '未指派'})"
+                )
+            delayed_html = f'<div class="summary-item delayed-summary"><div class="summary-item-label">延期阶段 ({len(delayed_phases)}个)</div><div class="summary-item-value">{len(delayed_phases)} 个</div><div class="summary-item-sub">{"，".join(items)}</div></div>'
+
+        over_budget_html = ""
+        if over_budget_phases:
+            items = []
+            for ph in over_budget_phases:
+                items.append(f"{ph.name}(+¥{ph.budget_variance():,.0f})")
+            over_budget_html = f'<div class="summary-item"><div class="summary-item-label">超支阶段 ({len(over_budget_phases)}个)</div><div class="summary-item-value">{len(over_budget_phases)} 个</div><div class="summary-item-sub">{"，".join(items)}</div></div>'
+
+        days_delivery = p.days_to_delivery
+        delivery_value = "未设置"
+        delivery_sub = ""
+        if days_delivery is not None:
+            if days_delivery < 0:
+                delivery_value = f"已逾期 {-days_delivery} 天"
+                delivery_sub = f"原计划: {p.target_delivery_date.strftime('%Y-%m-%d')}"
+            elif days_delivery == 0:
+                delivery_value = "今天交付"
+                delivery_sub = f"目标: {p.target_delivery_date.strftime('%Y-%m-%d')}"
+            else:
+                delivery_value = f"还剩 {days_delivery} 天"
+                delivery_sub = f"目标: {p.target_delivery_date.strftime('%Y-%m-%d')}"
+
+        completed_phases = sum(1 for ph in p.phases if ph.completion_percent >= 100)
+        in_progress_phases = sum(1 for ph in p.phases if 0 < ph.completion_percent < 100)
+        not_started_phases = sum(1 for ph in p.phases if ph.completion_percent <= 0)
+
+        return f"""
+        <div class="summary-box">
+            <h2>📋 项目摘要</h2>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <div class="summary-item-label">整体进度</div>
+                    <div class="summary-item-value">{p.overall_completion:.1f}%</div>
+                    <div class="summary-item-sub">已完成{completed_phases}个 · 进行中{in_progress_phases}个 · 未开始{not_started_phases}个</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-item-label">距离交付</div>
+                    <div class="summary-item-value">{delivery_value}</div>
+                    <div class="summary-item-sub">{delivery_sub}</div>
+                </div>
+                {delayed_html}
+                {over_budget_html}
+            </div>
+        </div>
+        """
+
+    def _generate_progress_chart(self) -> str:
+        p = self.project
+
+        phases_html = ""
+        for phase in p.phases:
+            status_class = "normal"
+            if phase.is_delayed():
+                status_class = "delayed"
+            elif phase.completion_percent >= 100:
+                status_class = "completed"
+            elif phase.completion_percent > 0:
+                status_class = "in-progress"
+
+            phases_html += f"""
+            <div class="chart-row">
+                <div class="chart-label">{phase.name}</div>
+                <div class="chart-bars">
+                    <div class="chart-bar actual" style="left: 0; width: {phase.completion_percent}%; background: var(--color, #4361ee); --color: {'#e74c3c' if phase.is_delayed() else ('#2ecc71' if phase.completion_percent >= 100 else '#4361ee')};">
+                        {f"{phase.completion_percent:.0f}%" if phase.completion_percent > 10 else ""}
+                    </div>
+                </div>
+                <div class="chart-value">
+                    <div>{phase.completion_percent:.1f}%</div>
+                    <div style="font-size: 11px; color: {'#e74c3c' if phase.is_delayed() else '#666'};">
+                        {f"延期{phase.delay_days()}天" if phase.is_delayed() else (phase.owner or "未指派")}
+                    </div>
+                </div>
+            </div>
+            """
+
+        legend_html = """
+        <div class="chart-legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background: #2ecc71;"></div>
+                <span>已完成</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #4361ee;"></div>
+                <span>正常进行</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #f39c12;"></div>
+                <span>进行中</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #e74c3c;"></div>
+                <span>延期</span>
+            </div>
+        </div>
+        """
+
+        return legend_html + f'<div class="chart-container">{phases_html}</div>'
+
+    def _generate_cost_breakdown_chart(self, purchased: float, standard: float, machining: float, labor: float, total: float) -> str:
+        if total == 0:
+            return "<p>暂无成本数据</p>"
+
+        colors = ["#4361ee", "#8b5cf6", "#f39c12", "#2ecc71"]
+        labels = ["外购件", "标准件", "机加工费", "人工成本"]
+        values = [purchased, standard, machining, labor]
+
+        pcts = []
+        for v in values:
+            pcts.append((v / total * 100) if total > 0 else 0)
+
+        conic_gradient = ""
+        current_deg = 0
+        for i, pct in enumerate(pcts):
+            if pct > 0:
+                next_deg = current_deg + pct * 3.6
+                conic_gradient += f"{colors[i]} {current_deg}deg {next_deg}deg, "
+                current_deg = next_deg
+        conic_gradient = conic_gradient.rstrip(", ")
+
+        legend_html = ""
+        for i in range(4):
+            if pcts[i] > 0:
+                legend_html += f"""
+                <div class="cost-legend-item">
+                    <div class="cost-legend-color" style="background: {colors[i]};"></div>
+                    <div class="cost-legend-text">{labels[i]}</div>
+                    <div class="cost-legend-amount">¥{values[i]:,.0f}</div>
+                    <div class="cost-legend-pct">{pcts[i]:.1f}%</div>
+                </div>
+                """
+
+        return f"""
+        <div class="cost-breakdown">
+            <div class="cost-pie" style="background: conic-gradient({conic_gradient});">
+                <div class="cost-pie-center">
+                    <div class="cost-pie-value">¥{total:,.0f}</div>
+                    <div class="cost-pie-label">总成本</div>
+                </div>
+            </div>
+            <div class="cost-legend">
+                {legend_html}
+            </div>
+        </div>
+        """
+
     def _generate_gantt_chart(self) -> str:
         p = self.project
 
@@ -731,8 +1079,7 @@ class HtmlExporter:
                 width_pct = ((phase.actual_end - phase.actual_start).days / total_days) * 100
                 actual_bar = f'<div class="gantt-bar-actual {actual_class}" style="left: {left_pct}%; width: {width_pct}%;"></div>'
             elif phase.actual_start and not phase.actual_end:
-                from datetime import date as _date
-                today = _date.today()
+                today = date.today()
                 left_pct = ((phase.actual_start - min_date).days / total_days) * 100
                 end_date = min(today, max_date)
                 width_pct = max(1, ((end_date - phase.actual_start).days / total_days) * 100) * (phase.completion_percent / 100)
@@ -820,47 +1167,3 @@ class HtmlExporter:
         """
 
         return legend_html + chart_html
-
-    def _generate_cost_chart(self) -> str:
-        p = self.project
-
-        max_cost = max(
-            (max(phase.cost.purchased_parts, phase.cost.standard_parts,
-                 phase.cost.machining_fee, phase.cost.labor_cost)
-             for phase in p.phases),
-            default=1
-        )
-        if max_cost == 0:
-            max_cost = 1
-
-        chart_html = '<div class="cost-chart">'
-
-        for phase in p.phases:
-            c = phase.cost
-            h_purchased = max(2, (c.purchased_parts / max_cost) * 160)
-            h_standard = max(2, (c.standard_parts / max_cost) * 160)
-            h_machining = max(2, (c.machining_fee / max_cost) * 160)
-            h_labor = max(2, (c.labor_cost / max_cost) * 160)
-
-            chart_html += f"""
-            <div class="cost-bar-group">
-                <div class="cost-bars">
-                    <div class="cost-bar purchased" style="height: {h_purchased}px;">
-                        {f"¥{c.purchased_parts:,.0f}" if c.purchased_parts > 0 else ""}
-                    </div>
-                    <div class="cost-bar standard" style="height: {h_standard}px;">
-                        {f"¥{c.standard_parts:,.0f}" if c.standard_parts > 0 else ""}
-                    </div>
-                    <div class="cost-bar machining" style="height: {h_machining}px;">
-                        {f"¥{c.machining_fee:,.0f}" if c.machining_fee > 0 else ""}
-                    </div>
-                    <div class="cost-bar labor" style="height: {h_labor}px;">
-                        {f"¥{c.labor_cost:,.0f}" if c.labor_cost > 0 else ""}
-                    </div>
-                </div>
-                <div class="cost-label">{phase.name}</div>
-            </div>
-            """
-
-        chart_html += "</div>"
-        return chart_html
