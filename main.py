@@ -1,7 +1,7 @@
 import sys
 import os
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, Tuple
 
 from models import Project, Phase, PHASE_NAMES
 from repository import ProjectRepository
@@ -9,6 +9,7 @@ from gantt import GanttChart
 from cost_report import CostReport
 from html_exporter import HtmlExporter
 from reminder import Reminder
+from dashboard import Dashboard
 
 
 def clear_screen():
@@ -30,24 +31,32 @@ def parse_date_input(prompt: str) -> Optional[date]:
             print("  ❌ 日期格式错误，请使用 YYYY-MM-DD 格式，或留空跳过")
 
 
-def parse_float_input(prompt: str, default: float = 0.0) -> float:
+def parse_float_input(prompt: str, default: float = 0.0, allow_negative: bool = True) -> float:
     while True:
         s = input(prompt).strip()
         if not s:
             return default
         try:
-            return float(s)
+            val = float(s)
+            if not allow_negative and val < 0:
+                print("  ❌ 不能输入负数，请重新输入")
+                continue
+            return val
         except ValueError:
             print("  ❌ 请输入有效的数字")
 
 
-def parse_int_input(prompt: str, default: int = 0) -> int:
+def parse_int_input(prompt: str, default: int = 0, allow_negative: bool = True) -> int:
     while True:
         s = input(prompt).strip()
         if not s:
             return default
         try:
-            return int(s)
+            val = int(s)
+            if not allow_negative and val < 0:
+                print("  ❌ 不能输入负数，请重新输入")
+                continue
+            return val
         except ValueError:
             print("  ❌ 请输入有效的整数")
 
@@ -79,12 +88,14 @@ class ProjectTrackerApp:
             elif choice == "4":
                 self._delete_project()
             elif choice == "5":
-                self._show_gantt_chart()
+                self._show_dashboard()
             elif choice == "6":
-                self._show_cost_report()
+                self._show_gantt_chart()
             elif choice == "7":
-                self._export_html_report()
+                self._show_cost_report()
             elif choice == "8":
+                self._export_html_report()
+            elif choice == "9":
                 self._show_all_delayed()
             elif choice == "0":
                 print("\n感谢使用，再见！")
@@ -109,12 +120,13 @@ class ProjectTrackerApp:
         print("    2. 列出所有项目")
         print("    3. 选择/进入项目")
         print("    4. 删除项目")
+        print("    5. 多项目汇总看板")
         print()
         print("  【数据录入与查看】")
-        print("    5. 查看甘特图")
-        print("    6. 查看成本报告")
-        print("    7. 导出HTML报告")
-        print("    8. 查看所有延期项目")
+        print("    6. 查看甘特图")
+        print("    7. 查看成本报告")
+        print("    8. 导出HTML报告")
+        print("    9. 查看所有延期项目")
         print()
         print("    0. 退出系统")
         print("-" * 60)
@@ -261,11 +273,12 @@ class ProjectTrackerApp:
             print("-" * 80)
             print("  操作选项:")
             print("    1. 编辑阶段进度")
-            print("    2. 编辑阶段成本")
-            print("    3. 查看甘特图")
-            print("    4. 查看成本报告")
-            print("    5. 导出HTML报告")
-            print("    6. 查看延期详情")
+            print("    2. 编辑阶段预算")
+            print("    3. 编辑阶段成本")
+            print("    4. 查看甘特图")
+            print("    5. 查看成本报告")
+            print("    6. 导出HTML报告")
+            print("    7. 查看延期详情")
             print("    0. 返回主菜单")
             print("-" * 80)
 
@@ -274,14 +287,16 @@ class ProjectTrackerApp:
             if choice == "1":
                 self._edit_phase_progress()
             elif choice == "2":
-                self._edit_phase_cost()
+                self._edit_phase_budget()
             elif choice == "3":
-                self._show_gantt_for_project(p)
+                self._edit_phase_cost()
             elif choice == "4":
-                self._show_cost_for_project(p)
+                self._show_gantt_for_project(p)
             elif choice == "5":
-                self._export_html_for_project(p)
+                self._show_cost_for_project(p)
             elif choice == "6":
+                self._export_html_for_project(p)
+            elif choice == "7":
                 self._show_delayed_for_project(p)
             elif choice == "0":
                 break
@@ -322,7 +337,7 @@ class ProjectTrackerApp:
     def _edit_single_phase(self, phase: Phase):
         clear_screen()
         print("\n" + "=" * 60)
-        print(f"  编辑【{phase.name}】阶段")
+        print(f"  编辑【{phase.name}】阶段进度")
         print("=" * 60)
         print()
 
@@ -337,6 +352,13 @@ class ProjectTrackerApp:
 
         print("  请输入新值（直接回车保留当前值）:")
         print()
+
+        old_planned_start = phase.planned_start
+        old_planned_end = phase.planned_end
+        old_actual_start = phase.actual_start
+        old_actual_end = phase.actual_end
+        old_owner = phase.owner
+        old_completion = phase.completion_percent
 
         ps = parse_date_input(f"  计划开始日期 (当前: {phase.planned_start or '无'}): ")
         if ps:
@@ -360,17 +382,60 @@ class ProjectTrackerApp:
 
         completion = parse_float_input(
             f"  完成百分比 (当前: {phase.completion_percent:.1f}%): ",
-            phase.completion_percent
+            phase.completion_percent,
+            allow_negative=False
         )
         phase.completion_percent = min(100.0, max(0.0, completion))
 
         if phase.actual_end:
             phase.completion_percent = 100.0
 
-        print("\n  ✅ 阶段信息已更新")
+        ok, msg = phase.validate_all()
+        if not ok:
+            print(f"\n  ❌ 数据校验失败: {msg}")
+            print("     已取消本次修改，恢复原值")
+            phase.planned_start = old_planned_start
+            phase.planned_end = old_planned_end
+            phase.actual_start = old_actual_start
+            phase.actual_end = old_actual_end
+            phase.owner = old_owner
+            phase.completion_percent = old_completion
+            pause()
+            return False
+
+        changed = False
+        changes = []
+        if phase.planned_start != old_planned_start:
+            changes.append(f"计划开始: {old_planned_start} → {phase.planned_start}")
+            changed = True
+        if phase.planned_end != old_planned_end:
+            changes.append(f"计划结束: {old_planned_end} → {phase.planned_end}")
+            changed = True
+        if phase.actual_start != old_actual_start:
+            changes.append(f"实际开始: {old_actual_start} → {phase.actual_start}")
+            changed = True
+        if phase.actual_end != old_actual_end:
+            changes.append(f"实际结束: {old_actual_end} → {phase.actual_end}")
+            changed = True
+        if phase.owner != old_owner:
+            changes.append(f"负责人: {old_owner or '无'} → {phase.owner}")
+            changed = True
+        if abs(phase.completion_percent - old_completion) > 0.01:
+            changes.append(f"完成度: {old_completion:.1f}% → {phase.completion_percent:.1f}%")
+            changed = True
+
+        if not changed:
+            print("\n  ℹ️  未检测到任何修改")
+        else:
+            print(f"\n  ✅ 保存成功！已修改 {len(changes)} 项:")
+            for c in changes:
+                print(f"     - {c}")
+
         if phase.is_delayed():
-            print(f"     ⚠️  注意: 该阶段已延期 {phase.delay_days()} 天")
+            print(f"\n  ⚠️  注意: 该阶段已延期 {phase.delay_days()} 天")
+
         pause()
+        return True
 
     def _edit_phase_cost(self):
         p = self.current_project
@@ -420,28 +485,180 @@ class ProjectTrackerApp:
         print(f"    合计: ¥{c.total:,.2f}")
         print()
 
+        if phase.budget.total > 0:
+            b = phase.budget
+            over = "超支" if phase.is_over_budget() else "节余"
+            var_sign = "+" if phase.budget_variance() > 0 else ""
+            print(f"  预算对比:")
+            print(f"    预算合计: ¥{b.total:,.2f}")
+            print(f"    偏差: {var_sign}¥{phase.budget_variance():,.2f} ({var_sign}{phase.budget_variance_percent():.2f}%) - {over}")
+            print()
+
         print("  请输入新值（直接回车保留当前值）:")
         print()
 
-        pp = parse_float_input(f"  外购件费用 (当前: ¥{c.purchased_parts:,.2f}): ", c.purchased_parts)
+        old_purchased = c.purchased_parts
+        old_standard = c.standard_parts
+        old_machining = c.machining_fee
+        old_labor_hours = c.labor_hours
+        old_labor_rate = c.labor_hour_rate
+        old_total = c.total
+
+        pp = parse_float_input(f"  外购件费用 (当前: ¥{c.purchased_parts:,.2f}): ", c.purchased_parts, allow_negative=False)
         c.purchased_parts = pp
 
-        sp = parse_float_input(f"  标准件费用 (当前: ¥{c.standard_parts:,.2f}): ", c.standard_parts)
+        sp = parse_float_input(f"  标准件费用 (当前: ¥{c.standard_parts:,.2f}): ", c.standard_parts, allow_negative=False)
         c.standard_parts = sp
 
-        mf = parse_float_input(f"  机加工费 (当前: ¥{c.machining_fee:,.2f}): ", c.machining_fee)
+        mf = parse_float_input(f"  机加工费 (当前: ¥{c.machining_fee:,.2f}): ", c.machining_fee, allow_negative=False)
         c.machining_fee = mf
 
-        lh = parse_float_input(f"  工时 (小时) (当前: {c.labor_hours:.1f}): ", c.labor_hours)
+        lh = parse_float_input(f"  工时 (小时) (当前: {c.labor_hours:.1f}): ", c.labor_hours, allow_negative=False)
         c.labor_hours = lh
 
-        hr = parse_float_input(f"  工时单价 (¥/小时) (当前: ¥{c.labor_hour_rate:.2f}): ", c.labor_hour_rate)
+        hr = parse_float_input(f"  工时单价 (¥/小时) (当前: ¥{c.labor_hour_rate:.2f}): ", c.labor_hour_rate, allow_negative=False)
         c.labor_hour_rate = hr
 
-        print(f"\n  ✅ 成本信息已更新")
-        print(f"     新的总成本: ¥{c.total:,.2f}")
-        print(f"     其中人工成本: ¥{c.labor_cost:,.2f}")
+        ok, msg = phase.validate_all()
+        if not ok:
+            print(f"\n  ❌ 数据校验失败: {msg}")
+            print("     已取消本次修改，恢复原值")
+            c.purchased_parts = old_purchased
+            c.standard_parts = old_standard
+            c.machining_fee = old_machining
+            c.labor_hours = old_labor_hours
+            c.labor_hour_rate = old_labor_rate
+            pause()
+            return False
+
+        new_total = c.total
+        if abs(new_total - old_total) < 0.01:
+            print("\n  ℹ️  未检测到成本变化")
+        else:
+            print(f"\n  ✅ 保存成功！")
+            print(f"     总成本变化: ¥{old_total:,.2f} → ¥{new_total:,.2f}")
+            diff = new_total - old_total
+            diff_sign = "+" if diff > 0 else ""
+            print(f"     差额: {diff_sign}¥{diff:,.2f}")
+
+            if phase.budget.total > 0:
+                if phase.is_over_budget():
+                    print(f"     ⚠️  注意: 当前已超支 ¥{phase.budget_variance():,.2f} ({phase.budget_variance_percent():.2f}%)")
+                else:
+                    print(f"     ℹ️  剩余预算: ¥{phase.budget.total - phase.cost.total:,.2f}")
+
         pause()
+        return True
+
+    def _edit_phase_budget(self):
+        p = self.current_project
+        if not p:
+            return
+
+        clear_screen()
+        print("\n" + "=" * 60)
+        print("  编辑阶段预算")
+        print("=" * 60)
+        print()
+
+        for i, phase in enumerate(p.phases, 1):
+            status = ""
+            if phase.is_over_budget():
+                status = " ❌ 超支"
+            elif phase.budget.total > 0:
+                status = " ✅ 正常"
+            print(f"    {i}. {phase.name} - 预算: ¥{phase.budget.total:,.2f}{status}")
+
+        choice = input("\n  选择要编辑的阶段 (0 取消): ").strip()
+        try:
+            idx = int(choice)
+            if idx == 0:
+                return
+            if 1 <= idx <= len(p.phases):
+                phase = p.phases[idx - 1]
+                saved = self._edit_single_phase_budget(phase)
+                if saved:
+                    self.repo.update(p)
+            else:
+                print("  ❌ 无效的阶段序号")
+                pause()
+        except ValueError:
+            print("  ❌ 请输入数字")
+            pause()
+
+    def _edit_single_phase_budget(self, phase: Phase) -> bool:
+        clear_screen()
+        print("\n" + "=" * 60)
+        print(f"  编辑【{phase.name}】阶段预算")
+        print("=" * 60)
+        print()
+
+        b = phase.budget
+        print(f"  当前预算明细:")
+        print(f"    外购件预算: ¥{b.purchased_parts:,.2f}")
+        print(f"    标准件预算: ¥{b.standard_parts:,.2f}")
+        print(f"    机加工费预算: ¥{b.machining_fee:,.2f}")
+        print(f"    人工成本预算: ¥{b.labor_cost:,.2f}")
+        print(f"    预算合计: ¥{b.total:,.2f}")
+        print()
+
+        if phase.cost.total > 0:
+            over = "超支" if phase.is_over_budget() else "节余"
+            var_sign = "+" if phase.budget_variance() > 0 else ""
+            print(f"  实际成本: ¥{phase.cost.total:,.2f}")
+            print(f"  偏差: {var_sign}¥{phase.budget_variance():,.2f} ({var_sign}{phase.budget_variance_percent():.2f}%) - {over}")
+            print()
+
+        print("  请输入新值（直接回车保留当前值）:")
+        print()
+
+        old_pp = b.purchased_parts
+        old_sp = b.standard_parts
+        old_mf = b.machining_fee
+        old_lc = b.labor_cost
+        old_total = b.total
+
+        pp = parse_float_input(f"  外购件预算 (当前: ¥{b.purchased_parts:,.2f}): ", b.purchased_parts, allow_negative=False)
+        b.purchased_parts = pp
+
+        sp = parse_float_input(f"  标准件预算 (当前: ¥{b.standard_parts:,.2f}): ", b.standard_parts, allow_negative=False)
+        b.standard_parts = sp
+
+        mf = parse_float_input(f"  机加工费预算 (当前: ¥{b.machining_fee:,.2f}): ", b.machining_fee, allow_negative=False)
+        b.machining_fee = mf
+
+        lc = parse_float_input(f"  人工成本预算 (当前: ¥{b.labor_cost:,.2f}): ", b.labor_cost, allow_negative=False)
+        b.labor_cost = lc
+
+        ok, msg = phase.validate_all()
+        if not ok:
+            print(f"\n  ❌ 数据校验失败: {msg}")
+            print("     已取消本次修改，恢复原值")
+            b.purchased_parts = old_pp
+            b.standard_parts = old_sp
+            b.machining_fee = old_mf
+            b.labor_cost = old_lc
+            pause()
+            return False
+
+        new_total = b.total
+        if abs(new_total - old_total) < 0.01:
+            print("\n  ℹ️  未检测到预算变化")
+        else:
+            print(f"\n  ✅ 保存成功！")
+            print(f"     预算合计: ¥{old_total:,.2f} → ¥{new_total:,.2f}")
+            diff = new_total - old_total
+            diff_sign = "+" if diff > 0 else ""
+            print(f"     差额: {diff_sign}¥{diff:,.2f}")
+
+            if phase.cost.total > 0:
+                if phase.is_over_budget():
+                    print(f"     ⚠️  注意: 当前已超支 ¥{phase.budget_variance():,.2f}")
+                else:
+                    print(f"     ℹ️  剩余预算: ¥{phase.budget.total - phase.cost.total:,.2f}")
+
+        pause()
+        return True
 
     def _show_gantt_chart(self):
         if self.current_project:
@@ -588,6 +805,78 @@ class ProjectTrackerApp:
                 print()
 
         pause()
+
+    def _show_dashboard(self):
+        status_filter = "all"
+        owner_filter = "all"
+
+        while True:
+            clear_screen()
+            projects = self.repo.get_all()
+            dashboard = Dashboard(projects)
+
+            print(dashboard.render(status_filter, owner_filter))
+            print("-" * 100)
+
+            cmd = input("请输入操作 (s=状态筛选 / o=负责人筛选 / 0=返回): ").strip().lower()
+
+            if cmd == "0":
+                break
+            elif cmd.startswith("s="):
+                status = cmd[2:].strip()
+                if status in ["all", "delayed", "normal", "over_budget"]:
+                    status_filter = status
+                else:
+                    print("  ❌ 无效的状态筛选值，可选: all/delayed/normal/over_budget")
+                    pause()
+            elif cmd == "s":
+                print("\n  状态筛选选项:")
+                print("    all - 全部项目")
+                print("    delayed - 延期项目")
+                print("    normal - 正常项目（未延期）")
+                print("    over_budget - 超支项目")
+                s = input("\n  请输入状态筛选值: ").strip().lower()
+                if s in ["all", "delayed", "normal", "over_budget"]:
+                    status_filter = s
+                else:
+                    print("  ❌ 无效的状态")
+                    pause()
+            elif cmd.startswith("o="):
+                owner = cmd[2:].strip()
+                owners = dashboard.get_all_owners()
+                if owner == "all" or owner in owners:
+                    owner_filter = owner
+                else:
+                    print(f"  ❌ 未找到负责人 '{owner}'")
+                    print(f"  可用负责人: {', '.join(owners) if owners else '无'}")
+                    pause()
+            elif cmd == "o":
+                owners = dashboard.get_all_owners()
+                print(f"\n  负责人列表 (共 {len(owners)} 人):")
+                if owners:
+                    for i, owner in enumerate(owners, 1):
+                        print(f"    {i}. {owner}")
+                    print(f"    0. 显示全部")
+                else:
+                    print("    暂无负责人数据")
+
+                choice = input("\n  请选择负责人序号: ").strip()
+                if choice == "0":
+                    owner_filter = "all"
+                else:
+                    try:
+                        idx = int(choice)
+                        if 1 <= idx <= len(owners):
+                            owner_filter = owners[idx - 1]
+                        else:
+                            print("  ❌ 无效的序号")
+                            pause()
+                    except ValueError:
+                        print("  ❌ 请输入数字")
+                        pause()
+            elif cmd:
+                print("  ❌ 无效的操作")
+                pause()
 
 
 def main():
